@@ -1,0 +1,1369 @@
+#--------设备信息描述-------------------------
+<<: !include config.yaml
+packages:
+#  configmqtt: !include configmqtt.yaml
+  deviceinfo: !include  deviceinfo.yaml
+#0,2,4,5,12,15最好不用
+#34，35，36，39没有内部拉高
+#spi flash 6，7，8，9，10，11 不能使用
+#21，22为硬件i2c
+#触控4，0，2，12，13，14，15，27，33，32
+#1，2，3，4，0，5
+substitutions:
+  mqtt_server_1: !secret mqtt_server_
+  mqtt_port_1: !secret mqtt_port_
+  mqtt_user_1: !secret mqtt_user_
+  mqtt_password_1: !secret mqtt_password_
+  mqtt_prefix_1: !secret mqtt_prefix_
+  sun_latitude_1: !secret latitude_
+  sun_longitude_1 : !secret longitude_
+  version_date_1 : !secret version_date_
+  
+  pin_ctrl_power:  GPIO15  #外部拉高
+  light_stat:  GPIO32  #外部拉高
+  pin_iic_sda: GPIO14
+  pin_iic_scl: GPIO13
+
+  pin_in1: GPIO35
+  pin_in2: GPIO36
+  pin_in3: GPIO39
+  pin_in4: GPIO34
+
+  pin_tx: GPIO33
+  pin_rx: GPIO32
+
+  pin_bmq_a: GPIO17
+  pin_bmq_b: GPIO15
+  pin_bmq_c: GPIO0
+
+  pin_8574_relay1: '0'
+  pin_8574_relay2: '1'
+
+  pin_8574_light1: '4'
+  pin_8574_light2: '5'
+  pin_8574_light3: '6'
+  pin_8574_light4: '7'
+
+
+  pin_rttl: GPIO2
+
+  pin_pwm1: GPIO19
+
+
+  date_update_interval: 30s
+
+
+
+  config_version: 'esp32-pump_mqtt_${version_date_1}' #安装位置：GPIO   如：卧室：L:1/2 DS:2
+  device_name: esp32-pump   #esp+按键+继电器（插座Socket+设备rtu）
+
+esphome:
+  name: $device_name
+  platform: ESP32
+  board: esp-wrover-kit
+  name_add_mac_suffix: yes #允许用户编译单个二进制文件来闪存许多相同的设备，并且它们都将具有唯一的名称/主机名
+  includes:
+    - DFRobot_SHT20.h
+    - DFRobot_SHT20.cpp
+    - SHT20.h
+
+  on_boot: 
+
+#    - priority: 300
+#      then:
+#        - lambda: |-
+#              id(mqtt_client).set_broker_address(id(g_address));
+#              id(mqtt_client).set_broker_port(id(g_port));
+#              id(mqtt_client).set_username(id(g_username));
+#              id(mqtt_client).set_password(id(g_password));
+#              id(mqtt_client).set_discovery_info(id(g_prefix).c_str(), mqtt::MQTT_MAC_ADDRESS_UNIQUE_ID_GENERATOR, mqtt::MQTT_DEVICE_NAME_OBJECT_ID_GENERATOR, true);
+#              id(mqtt_client).set_topic_prefix(App.get_name());
+#
+#              id(mqtt_client).set_birth_message(mqtt::MQTTMessage{
+#                  .topic = App.get_name() + "/" + "status",
+#                  .payload = "online",
+#                  .qos = 1,
+#                  .retain = true,
+#              });
+#              id(mqtt_client).set_last_will(mqtt::MQTTMessage{
+#                  .topic = App.get_name() + "/" + "status",
+#                  .payload = "offline",
+#                  .qos = 1,
+#                  .retain = true,
+#              });
+#              id(mqtt_client).set_log_message_template(mqtt::MQTTMessage{
+#                  .topic = App.get_name() + "/" + "status",
+#                  .payload = "offline",
+#                  .qos = 1,
+#                  .retain = true,
+#              });
+
+
+
+
+    - priority: -100
+      then:
+        - lambda: |-
+            id(time_screen_out) = id(sntp_time).now().timestamp   ;
+            if (id(switch_wifi).state){
+              id(switch_wifi).turn_on();
+            } else{
+              id(switch_wifi).turn_off();
+            }
+#        - select.set_index:
+#            id: button_select
+#            index: !lambda |-
+#                    return 0;
+
+globals:
+  
+  - id: g_address
+    type:  std::string
+    initial_value: '"$mqtt_server_1"'
+    restore_value: true
+
+
+  - id: g_port
+    type: int
+    initial_value: '$mqtt_port_1'
+    restore_value: false
+
+  - id: g_username
+    type:  std::string
+    initial_value: '"$mqtt_user_1"'
+    restore_value: false
+
+  - id: g_password
+    type:  std::string
+    initial_value: '"$mqtt_password_1"'
+    restore_value: false
+
+  - id: g_prefix
+    type:  std::string
+    initial_value: '"$mqtt_prefix_1"'
+    restore_value: true
+
+  - id: g_sun_latitude
+    type:  float
+    initial_value: '$sun_latitude_1'   
+    restore_value: true
+
+  - id: g_sun_longitude
+    type:  float
+    initial_value: '$sun_longitude_1'
+    restore_value: true
+
+  - id: flag_r1_state    #设置全局变量，情景模式控制
+    type: int
+    restore_value: yes
+
+  - id: init_system    #设置全局变量，情景模式控制
+    type: int
+    initial_value: "0"
+
+
+  - id: flag_pump_starttimes    #设置全局变量，情景模式控制
+    type: int
+    initial_value: "0" 
+    restore_value: true
+
+
+  - id: l1_on
+    type: int[3]
+    restore_value: yes
+    initial_value: "{255,0,0}"
+  - id: l2_on
+    type: int[3]
+    restore_value: yes
+    initial_value: "{255,0,0}"
+  - id: l3_on
+    type: int[3]
+    restore_value: yes
+    initial_value: "{255,0,0}"
+  - id: l4_on
+    type: int[3]
+    restore_value: yes
+    initial_value: "{255,0,0}"
+  - id: l5_on
+    type: int[3]
+    restore_value: yes
+    initial_value: "{255,0,0}"
+  - id: l6_on
+    type: int[3]
+    restore_value: yes
+    initial_value: "{255,0,0}"
+  - id: backlight_on
+    type: int[3]
+    restore_value: yes
+    initial_value: "{255,255,255}"
+  - id: brightness_on
+    type: int
+    restore_value: yes
+    initial_value: "100"
+  - id: sun_flag    #设置全局变量，情景模式控制
+    type: int
+    initial_value: "1"
+
+  - id: display_menu    #设置全局变量，情景模式控制
+    type: int
+    initial_value: "0"
+
+
+  - id: set_active    #设置全局变量，情景模式控制
+    type: int
+    initial_value: "0"
+
+
+  - id: pwm1_float   #设置全局变量，情景模式控制
+    type: float
+    initial_value: "0"
+
+  - id: pwm2_float   #设置全局变量，情景模式控制
+    type: float
+    initial_value: "0"
+
+  - id: pwm3_float   #设置全局变量，情景模式控制
+    type: float
+    initial_value: "0"
+
+  - id: pwm4_float   #设置全局变量，情景模式控制
+    type: float
+    initial_value: "0"
+
+  - id: pwm5_float   #设置全局变量，情景模式控制
+    type: float
+    initial_value: "0"
+
+  - id: pwm6_float   #设置全局变量，情景模式控制
+    type: float
+    initial_value: "0"
+
+  - id: time_screen_out   #设置全局变量，屏幕超时关闭
+    type: int
+    initial_value: "0"
+
+
+  - id: flag_wifi_switch   #设置全局变量，屏幕超时关闭
+    type: int
+    initial_value: "0"
+    restore_value: yes
+
+  - id: time_pump_up   #设置全局变量，屏幕超时关闭
+    type: int
+    initial_value: "0"
+
+uart:
+  rx_pin: $pin_rx
+  tx_pin: $pin_tx
+  baud_rate: 2400
+  data_bits: 8
+  stop_bits: 1
+  id: mod_uart
+
+i2c:
+  sda: $pin_iic_sda
+  scl: $pin_iic_scl
+  scan: True
+  id: bh_a
+
+
+#ethernet:            #以太网接口
+#  type: LAN8720
+#  mdc_pin: GPIO23
+#  mdio_pin: GPIO18
+#  clk_mode: GPIO17_OUT
+#  phy_addr: 0
+#  manual_ip:
+#    static_ip: 192.168.1.200
+#    gateway: 192.168.1.1
+#    subnet: 255.255.255.0
+#    dns1: 218.4.4.4
+#    dns2: 218.2.2.2
+
+
+pcf8574:
+  - id: 'pcf8574_hub'
+    address: 0x27
+    pcf8575: false
+
+
+output:   
+  - platform: ledc
+    id: rtttl_out  
+    pin: 
+      number: $pin_rttl
+      inverted: false  
+
+  - platform: gpio # 板载led灯
+    id: light1_out
+    pin:
+      pcf8574: pcf8574_hub
+      # Use pin number 0
+      number: $pin_8574_light1
+      # One of INPUT or OUTPUT
+      mode:
+        output: true
+      inverted: false
+
+  - platform: gpio # 板载led灯
+    id: light2_out
+    pin:
+      pcf8574: pcf8574_hub
+      # Use pin number 0
+      number: $pin_8574_light2
+      # One of INPUT or OUTPUT
+      mode:
+        output: true
+      inverted: false
+
+  - platform: gpio # 板载led灯
+    id: light3_out
+    pin:
+      pcf8574: pcf8574_hub
+      # Use pin number 0
+      number: $pin_8574_light3
+      # One of INPUT or OUTPUT
+      mode:
+        output: true
+      inverted: false
+  - platform: gpio # 板载led灯
+    id: light4_out
+    pin:
+      pcf8574: pcf8574_hub
+      # Use pin number 0
+      number: $pin_8574_light4
+      # One of INPUT or OUTPUT
+      mode:
+        output: true
+      inverted: false
+
+  - platform: ledc
+    id: pwm1_out
+    pin: 
+      number: $pin_pwm1
+      inverted: true    
+
+
+
+      
+    
+light: 
+  - platform: monochromatic
+    name: "pwm_Light1"
+    restore_mode: RESTORE_DEFAULT_OFF
+    id: pwm_Light1
+    output: pwm1_out
+
+  - platform: binary
+    name: "light1"
+    id: light1
+    output: light1_out
+    effects:
+      - strobe:
+
+  - platform: binary
+    name: "light2"
+    output: light2_out
+    id: light2
+
+  - platform: binary
+    name: "light3"
+    output: light3_out
+    id: light3
+
+  - platform: binary
+    name: "light4"
+    output: light4_out
+    id: light4
+
+
+
+switch:
+  - platform: gpio
+    name: "relay1"
+    id: relay1
+    pin:
+      pcf8574: pcf8574_hub
+      # Use pin number 0
+      number: $pin_8574_relay1
+      # One of INPUT or OUTPUT
+      mode:
+        output: true
+      inverted: true
+    on_turn_on:
+      then:
+        - lambda: |-
+              id(time_pump_up)=id(sntp_time).now().timestamp ;
+              id(flag_pump_starttimes)+=1;
+              id(pump_start_times).publish_state(id(flag_pump_starttimes));
+  - platform: gpio
+    name: "relay2"
+    id: relay2
+    pin:
+      pcf8574: pcf8574_hub
+      # Use pin number 0
+      number: $pin_8574_relay2
+      # One of INPUT or OUTPUT
+      mode:
+        output: true
+      inverted: true
+
+
+
+  - platform: template
+    name: "switch_wifi"
+    id: switch_wifi
+    lambda: |-
+        return id(flag_wifi_switch);
+    turn_on_action:
+      then:
+        - lambda: |-
+            id(flag_wifi_switch)=1;
+      
+    on_turn_on:
+      then:
+        -  wifi.enable:
+    turn_off_action:
+      then:
+        - lambda: |-
+            id(flag_wifi_switch)=0;
+    on_turn_off:
+      then:
+        -  wifi.disable:
+
+
+
+
+modbus:
+  send_wait_time: 200ms
+  uart_id: mod_uart
+  id: mod_bus
+
+modbus_controller:
+  - id: sdm_2
+    address: 2
+    modbus_id: mod_bus
+    command_throttle: 100ms
+    setup_priority: -10
+    update_interval: 10s
+
+  - id: sdm_1
+    address: 1
+    modbus_id: mod_bus
+    command_throttle: 100ms
+    setup_priority: -10
+    update_interval: 10s
+sensor:
+  - platform: template
+    name: "pump_start_times"
+    id: pump_start_times
+    lambda: return id(flag_pump_starttimes);
+    update_interval: 60s
+  - platform: modbus_controller
+    modbus_controller_id: sdm_2
+    name: "water_cm"
+    address: 4
+    register_type: "holding"
+    value_type: S_WORD 
+    accuracy_decimals: 1
+    unit_of_measurement: 'cm'
+    id: water_cm
+    filters:
+      - multiply: 0.1
+      - lambda: |-    
+          if (id(run_mode).state == "自动"){
+            if (x+id(water_offset_set).state<id(water_pump_off).state){
+              id(relay1).turn_off();
+            } else if ((x+id(water_offset_set).state)>id(water_pump_on).state){
+              id(relay1).turn_on();
+            }
+          }
+            return x+id(water_offset_set).state  ;
+        
+
+
+  - platform: modbus_controller  #电度 unsigned dword  0.01
+    modbus_controller_id: sdm_1
+    name: "ac_energy"
+    id: ac_energy
+    address: 0x00
+    register_type: "holding"
+    value_type: U_DWORD 
+    accuracy_decimals: 1
+    unit_of_measurement: 'kWh'
+    filters:
+      - multiply: 0.01
+
+
+  - platform: modbus_controller   #电压   unsigned word 0.1
+    modbus_controller_id: sdm_1
+    name: "ac_voltage"
+    id: ac_voltage
+    address: 0x0C
+    register_type: "holding"
+    value_type: U_WORD 
+    accuracy_decimals: 1
+    unit_of_measurement: 'V'
+    filters:
+      - multiply: 0.1
+
+
+
+  - platform: modbus_controller  #电流   unsigned word 0.1
+    modbus_controller_id: sdm_1
+    name: "ac_current"
+    id: ac_current
+    address: 0x0D
+    register_type: "holding"
+    value_type: U_WORD 
+    accuracy_decimals: 1
+    unit_of_measurement: 'A'
+    filters:
+      - multiply: 0.01
+      - lambda: |-    
+            return x+id(ac_current_offset_set).state  ;
+
+
+  - platform: modbus_controller   #有功   unsigned word 1
+    modbus_controller_id: sdm_1
+    name: "ac_power"
+    id: ac_power
+    address: 0x0E
+    register_type: "holding"
+    value_type: U_WORD 
+    accuracy_decimals: 1
+    unit_of_measurement: 'W'
+
+
+
+  - platform: modbus_controller  # 无功reactive power  1
+    modbus_controller_id: sdm_1
+    name: "ac_rppower"
+    id: ac_rppower
+    address: 0x0F
+    register_type: "holding"
+    value_type: U_WORD 
+    accuracy_decimals: 1
+    unit_of_measurement: 'VAr'
+
+
+
+  - platform: modbus_controller  # 功率因素  power  factor 1
+    modbus_controller_id: sdm_1
+    name: "ac_powerfactor"
+    id: ac_powerfactor
+    address: 0x10
+    register_type: "holding"
+    value_type: U_WORD 
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.001
+    unit_of_measurement: 'pf'
+
+
+  - platform: modbus_controller
+    modbus_controller_id: sdm_1
+    name: "ac_frequency"
+    id: ac_frequency
+    address: 0x11
+    register_type: "holding"
+    value_type: U_WORD 
+    accuracy_decimals: 1
+    unit_of_measurement: 'Hz'
+    filters:
+      - multiply: 0.01
+
+
+
+
+
+
+
+  - platform: ina226
+    address: 0x41
+    shunt_resistance: 0.0045 ohm
+    max_current: 50A
+    # adc time used for both, Bus Voltage and Shunt Voltage
+    update_interval: 60s
+    current:
+      name: "dc_current"
+      id: dc_current
+    power:
+      name: "dc_power"
+      id: dc_power
+    bus_voltage:
+      name: "dc_voltage"
+      id: dc_voltage
+    shunt_voltage:
+      name: "dc_ShuntVoltage"
+
+
+
+  - platform: rotary_encoder
+    name: "Rotary Encoder"
+    pin_a:  
+      number: $pin_bmq_a
+      inverted: true 
+    pin_b: 
+      number: $pin_bmq_b
+      inverted: true 
+    restore_mode: ALWAYS_ZERO
+    min_value: 0
+    max_value: 255
+    resolution: 1
+
+    on_clockwise:
+      - lambda: |-
+              id(time_screen_out) = id(sntp_time).now().timestamp ;
+              id(my_display_component).turn_on();
+              switch(id(display_menu))
+              {
+              case 0:{   //第一页菜单页，显示基本参数和开关继电器
+                    break;
+                    }
+
+              case 1:{  //第二页菜单也，显示低水位
+                    if (id(set_active)    ){
+                      id(water_pump_off).make_call().set_value(id(water_pump_off).state+1).perform();
+                      id(water_pump_off).traits.set_max_value(id(water_pump_on).state-1);
+                      //sensor_valuerangetrigger->set_max(id(water_pump_off).state);
+                      }
+                    break;
+                    }
+
+              case 2:{  //第三页，显示高水位
+                    if (id(set_active)   ){
+                      id(water_pump_on).make_call().set_value(id(water_pump_on).state+1).perform();
+                      //sensor_valuerangetrigger_2->set_min(id(water_pump_on).state);
+                      }
+                    break;
+                    }
+
+
+              case 3:{  //第三页，模式选择
+                    if (id(set_active)   ){
+                      id(run_mode).make_call().select_next(true).perform();
+                      }
+                    break;
+                    }
+
+              case 4:{  //第四页，显示水泵校准
+                    if (id(set_active)   ){
+                      id(water_offset_set).make_call().set_value(id(water_offset_set).state+1).perform();
+                      }
+                    break;
+                    }
+
+              case 5:{  //第五页，显示屏幕关闭时间
+                    if (id(set_active)   ){
+                      id(screen_offset_set).make_call().set_value(id(screen_offset_set).state+1).perform();
+                      }
+                    break;
+                    }
+
+              case 6:{  //第8页，空转电流设置
+                    if (id(set_active)   ){
+                      id(idle_current).make_call().set_value(id(idle_current).state+0.1).perform();
+                      }
+                    break;
+                    }
+
+
+              case 7:{  //第8页，堵转电流设置
+                    if (id(set_active)   ){
+                      id(up_current).make_call().set_value(id(up_current).state+0.1).perform();
+                      }
+                    break;
+                    }
+              case 12:{  //第8页，空转电流设置
+                    if (id(set_active)   ){
+                      id(switch_wifi).toggle();
+                      }
+                    break;
+                    }
+
+              default:{
+                      break;
+                            }
+              } 
+
+              if (not id(set_active)){
+                if (id(display_menu)>=13){
+                  id(display_menu)=0;
+                } else{
+                  id(display_menu)+=1;
+                }
+              }
+    on_anticlockwise:
+      - lambda: |-
+              
+              id(time_screen_out) = id(sntp_time).now().timestamp ;
+              id(my_display_component).turn_on();
+              switch(id(display_menu))
+              {
+
+              case 0:{    //第一页菜单页，显示基本参数和开关继电器
+                  break;
+                    }
+
+              case 1:{   //第二页菜单也，显示低水位
+                    if (id(set_active)  ){
+                      id(water_pump_off).make_call().set_value(id(water_pump_off).state-1).perform();
+                      //sensor_valuerangetrigger->set_max(id(water_pump_off).state);
+                      }
+                    break;
+                    }
+
+              case 2:{   //第三页，显示高水位
+                    if (id(set_active)    ){
+                      id(water_pump_on).make_call().set_value(id(water_pump_on).state-1).perform();
+                      id(water_pump_on).traits.set_min_value(id(water_pump_off).state+1);
+                      //sensor_valuerangetrigger_2->set_min(id(water_pump_on).state);
+                      }
+                    break;
+                    }
+
+
+              case 3:{  //第4页，模式选择
+                    if (id(set_active)   ){
+                      id(run_mode).make_call().select_next(true).perform();
+                      }
+                    break;
+                    }
+
+              case 4:{    //第5页，显示水泵校准
+                    if (id(set_active)   ){
+                      id(water_offset_set).make_call().set_value(id(water_offset_set).state-1).perform();
+                      }
+                    break;
+                    }
+
+              case 5:{  //第6页，显示屏幕关闭时间
+                    if (id(set_active)   ){
+                      id(screen_offset_set).make_call().set_value(id(screen_offset_set).state-1).perform();
+                      }
+                    break;
+                    }
+
+
+              case 6:{  //第8页，空转电流设置
+                    if (id(set_active)   ){
+                      id(idle_current).make_call().set_value(id(idle_current).state-0.1).perform();
+                      }
+                    break;
+                    }
+
+
+              case 7:{  //第8页，堵转电流设置
+                    if (id(set_active)   ){
+                      id(up_current).make_call().set_value(id(up_current).state-0.1).perform();
+                      }
+                    break;
+                    }
+
+              case 12:{  //第12页，wifi开关
+                    if (id(set_active)   ){
+                      id(switch_wifi).toggle();
+                      }
+                    break;
+                    }
+
+
+              default:{
+                      break;
+                            }
+              } 
+
+              if (not id(set_active)){
+                if (id(display_menu)<=0){
+                  id(display_menu)=13;
+                } else{
+                  id(display_menu)=id(display_menu)-1;
+                }
+              }
+
+
+
+
+
+
+
+
+  - platform: custom
+    lambda: |-
+      auto sht20 = new SHT20();
+      App.register_component(sht20);
+      return {sht20->temperature_sensor, sht20->humidity_sensor};
+    sensors:
+    - name: "sht20_Temperature"
+      id: sht20_t
+      unit_of_measurement: °C
+      accuracy_decimals: 2
+      filters:
+        - lambda: return x - 1;
+        - or:
+          - heartbeat: $date_update_interval
+          - delta: 0.3
+    - name: "sht20_Humidite"
+      id: sht20_h
+      unit_of_measurement: "%"
+      accuracy_decimals: 2
+      filters:
+        - or:
+          - heartbeat: $date_update_interval
+          - delta: 1
+
+
+
+
+rtttl:
+  output: rtttl_out
+  id: my_rtttl
+
+
+number:
+  - platform: template
+    name: "water_offset_set"
+    id: "water_offset_set"
+    optimistic: true
+    min_value: -100
+    max_value: 100
+    restore_value: true
+    initial_value: 0
+    step: 1  
+
+  - platform: template  #电流偏移校准
+    name: "ac_current_offset_set"
+    id: "ac_current_offset_set"
+    optimistic: true
+    min_value: -10
+    max_value: 10
+    restore_value: true
+    initial_value: 0
+    step: 0.1  
+
+
+  - platform: template
+    name: "screen_offset_set"
+    id: "screen_offset_set"
+    optimistic: true
+    min_value: 1
+    max_value: 10
+    restore_value: true
+    initial_value: 1
+    step: 1  
+
+  - platform: template
+    name: "water_pump_on"
+    id: "water_pump_on"
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    restore_value: true
+    initial_value: 100
+    step: 1 
+#            }
+
+
+  - platform: template
+    name: "water_pump_off"
+    id: "water_pump_off"
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    restore_value: true
+    initial_value: 1
+    step: 1  
+
+
+
+  - platform: template  #空转电流
+    name: "idle_current"
+    id: idle_current
+    optimistic: true
+    min_value: 0
+    max_value: 10
+    step: 0.1
+    initial_value: 1
+    restore_value: true
+
+
+
+  - platform: template  #堵转电流
+    name: "up_current"
+    id: up_current
+    optimistic: true
+    min_value: 0
+    max_value: 20
+    step: 0.1
+    initial_value: 20
+    restore_value: true
+
+
+
+
+  - platform: template  #异常电流时间
+    name: "err_time"
+    id: err_time
+    optimistic: true
+    min_value: 0
+    max_value: 600
+    step: 1
+    initial_value: 60
+    restore_value: true
+
+
+  - platform: template
+    name: "屏幕亮度"
+    id: screen_br
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    step: 1
+    restore_value: true
+    on_value:
+      then:
+        - lambda: |-
+            id(my_display_component).set_contrast(x/100);
+
+select:
+  - platform: template
+    name: "run_mode"
+    id: "run_mode"
+    optimistic: true
+    options:
+      - 自动
+      - 手动
+    initial_option: 自动
+    restore_value: true
+
+button:
+  - platform: template
+    name: "reset_device_alarm"
+    id: reset_device_alarm
+    on_press:
+      then:
+        - lambda: |-
+                id(alarm_).publish_state(0);
+
+
+
+
+binary_sensor:
+  - platform: template
+    name: "alarm_"
+    id: alarm_
+    on_press:
+      then:
+        - select.set:
+            id: run_mode
+            option: "手动"
+        - lambda: |-
+              id(relay1).turn_off();
+        - rtttl.play: 'two_short:d=4,o=5,b=100:16e6,16e6'
+
+    on_release:
+      then:
+        - rtttl.stop
+
+
+
+  - platform: gpio
+    name: "bmq_c"
+    pin:
+      number: $pin_bmq_c
+      inverted: true 
+      mode:
+        input: true
+        pullup: true
+    on_press:
+      then:
+#        - rtttl.play: 'siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e'
+        - lambda: |-  #刷新屏幕超时时间    打开屏幕 
+
+              id(time_screen_out) = id(sntp_time).now().timestamp ;
+              id(my_display_component).turn_on();
+
+              switch(id(display_menu))
+              {
+              case 0:{    //第一页菜单页，显示基本参数和开关继电器
+                  id(relay1).toggle();
+                  break;
+                    }
+
+              case 1:{
+
+                  if (id(set_active)==1){
+                    id(set_active)=0;
+                  } else{
+                    id(set_active)=1;
+                      }
+                  break;
+                }
+              case 2:{
+
+                  if (id(set_active)==1){
+                    id(set_active)=0;
+                  } else{
+                    id(set_active)=1;
+                      }
+                  break;
+                }
+              case 3:{
+
+                  if (id(set_active)==1){
+                    id(set_active)=0;
+                  } else{
+                    id(set_active)=1;
+                      }
+                  break;
+                }
+              case 4:{
+
+                  if (id(set_active)==1){
+                    id(set_active)=0;
+                  } else{
+                    id(set_active)=1;
+                      }
+                  break;
+                }
+              case 5:{
+
+                  if (id(set_active)==1){
+                    id(set_active)=0;
+                  } else{
+                    id(set_active)=1;
+                      }
+                  break;
+                }
+
+
+              case 6:{
+
+                  if (id(set_active)==1){
+                    id(set_active)=0;
+                  } else{
+                    id(set_active)=1;
+                      }
+                  break;
+                }
+
+
+              case 7:{
+
+                  if (id(set_active)==1){
+                    id(set_active)=0;
+                  } else{
+                    id(set_active)=1;
+                      }
+                  break;
+                }
+
+              case 8:{  //第9页，复位告警
+                    id(reset_device_alarm).press();
+                    break;
+                    }
+
+
+
+              case 12:{
+
+                  if (id(set_active)==1){
+                    id(set_active)=0;
+                  } else{
+                    id(set_active)=1;
+                      }
+                  break;
+                }
+
+
+              default:{
+                      break;
+                            }
+              } 
+
+
+
+
+
+
+
+  - platform: gpio
+    name: "IN1"
+    pin:
+      number: $pin_in1
+      inverted: true 
+      mode:
+        input: true
+  - platform: gpio
+    name: "IN2"
+    pin:
+      number: $pin_in2
+      inverted: true 
+      mode:
+        input: true
+  - platform: gpio
+    name: "IN3"
+    pin:
+      number: $pin_in3
+      inverted: true 
+      mode:
+        input: true
+  - platform: gpio
+    name: "IN4"
+    pin:
+      number: $pin_in4
+      inverted: true 
+      mode:
+        input: true
+
+font:
+  - file: '..\simfang.ttf'
+    id: font1
+    size: 16
+    glyphs: ℃环境湿水泵低位高校准闭灯带色温总开关堵输出时间电量参设置数压流屏幕亮功率分模自手动式选择钟交直频度因查看素"%()+|,-_.:°启次0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz联系人话于谭润芝告警复当前正常空转
+
+
+  - file: '..\simfang.ttf'
+    id: font2
+    size: 20
+    glyphs: 水位"%()+|,-_.:°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz分钟自动手
+      
+
+
+display:
+  - platform: ssd1306_i2c
+    model: "SSD1306 128x64"
+    address: 0x3C
+    id: my_display_component
+    contrast: 100%
+    pages:
+    - id: graph_page
+      lambda: |-
+              //ESP_LOGE("ble_adv", "    red :%d", id(time_screen_out));id(light1).current_values.get_color_temperature();
+              //ESP_LOGE("ble_adv", "    red :%0.2f", id(light1).current_values.get_color_temperature());
+              //ESP_LOGE("ble_adv", "    red :%0.2f", id(light1).current_values.get_brightness());
+              if (id(sntp_time).now().timestamp - id(time_screen_out) > 60*id(screen_offset_set).state){
+                id(my_display_component).turn_off();
+              } else{
+
+              switch(id(display_menu))
+              {
+              case 0:{
+                  it.printf(0, 0, id(font1), "水泵参数");
+                  //it.printf(0, 0, id(my_font), "The sensor value is: %.1f", id(my_sensor).state);
+                  it.printf(0, 16, id(font2), "水位:%.2fcm", id(water_cm).state);
+                  //it.printf(0, 32, id(font1), "电压: %.2fV", id(voltage_).state);
+                  //it.printf(0, 48, id(font1), "电流: %.2fA", id(current_).state);
+                  if (id(relay1).state==1){
+                        it.printf(64, 0, id(font1), "|输出:开");
+                      } else{
+                        it.printf(64, 0, id(font1), "|输出:关");
+                      }
+                  break;
+                    }
+              case 1:{
+                  
+                  if (id(set_active)==0){
+                        it.printf(0, 0, id(font1), "低水位设置查看");
+                        it.printf(0, 16, id(font1), "%.0f cm", id(water_pump_off).state);
+                      } 
+
+                      else{
+                        it.printf(0, 0, id(font1), "低水位设置设置");
+                        it.printf(0, 16, id(font2), "%.0f cm", id(water_pump_off).state);
+                      }
+                  break;
+                    }
+              case 2:{
+                  
+                  if (id(set_active)==0){
+                        it.printf(0, 0, id(font1), "高水位设置查看");
+                        it.printf(0, 16, id(font1), "%.0f cm", id(water_pump_on).state);
+                      } 
+
+                      else{
+                        it.printf(0, 0, id(font1), "高水位设置");
+                        it.printf(0, 16, id(font2), "%.0f cm", id(water_pump_on).state);
+                      }
+                  break;
+                    }
+                   
+              case 3:{
+                  
+                  if (id(set_active)==0){
+                        it.printf(0, 0, id(font1), "模式查看");
+                        it.printf(0, 16, id(font1), "%s", id(run_mode).state.c_str());
+                      } 
+
+                      else{
+                        it.printf(0, 0, id(font1), "模式设置");
+                        it.printf(0, 16, id(font2), "%s", id(run_mode).state.c_str());
+                      }
+                  break;
+                    }
+
+              case 4:{
+                  
+                  if (id(set_active)==0){
+                        it.printf(0, 0, id(font1), "水位校准查看");
+                        it.printf(0, 16, id(font1), "%.0f cm", id(water_offset_set).state);
+                      } 
+
+                      else{
+                        it.printf(0, 0, id(font1), "水位校准设置");
+                        it.printf(0, 16, id(font2), "%.0f cm", id(water_offset_set).state);
+                      }   
+                  break;
+                    }
+              case 5:{
+                  
+                  if (id(set_active)==0){
+                        it.printf(0, 0, id(font1), "屏幕关闭时间");
+                        it.printf(0, 16, id(font1), "%.0f 分钟", id(screen_offset_set).state);
+                      } 
+
+                      else{
+                        it.printf(0, 0, id(font1), "屏幕关闭时间设置");
+                        it.printf(0, 16, id(font2), "%.0f 分钟", id(screen_offset_set).state);
+                      }
+                  break;
+                    }
+
+
+
+
+              case 6:{
+                  
+                  if (id(set_active)==0){
+                        it.printf(0, 0, id(font1), "空转电流查看");
+                        it.printf(0, 16, id(font1), "%.1f A", id(idle_current).state);
+                      } 
+
+                      else{
+                        it.printf(0, 0, id(font1), "空转电流设置");
+                        it.printf(0, 16, id(font2), "%.2f A", id(idle_current).state);
+                      }
+                  break;
+                    }
+
+
+
+              case 7:{
+                  
+                  if (id(set_active)==0){
+                        it.printf(0, 0, id(font1), "堵转电流查看");
+                        it.printf(0, 16, id(font1), "%.1f A", id(up_current).state);
+                      } 
+
+                      else{
+                        it.printf(0, 0, id(font1), "堵转电流设置");
+                        it.printf(0, 16, id(font2), "%.2f A", id(up_current).state);
+                      }
+                  break;
+                    }
+
+
+
+              case 8:{
+                        if (id(alarm_).state){
+                        it.printf(0, 0, id(font1), "告警复位");
+                        it.printf(0, 16, id(font1), "当前:告警");
+                      } else{
+                        it.printf(0, 0, id(font1), "告警复位");
+                        it.printf(0, 16, id(font1), "当前:正常");
+
+                        
+                      }
+                      break;
+                    }
+
+              case 9:{
+                  
+                        it.printf(0, 0, id(font1), "直流参数");
+                        it.printf(0, 16, id(font1), "电压:%.1fV", id(dc_voltage).state);
+                        it.printf(0, 32, id(font1), "电流:%.1fA",id(dc_current).state);
+                        it.printf(0, 48, id(font1), "功率:%.1fW",id(dc_power).state);
+
+                  break;
+                    }
+
+              case 10:{
+                  
+                        it.printf(0, 0, id(font1), "交流参数");
+                        it.printf(0, 16, id(font1), "电压:%.1fV", id(ac_voltage).state);
+                        it.printf(0, 32, id(font1), "电流:%.1fA",id(ac_current).state);
+                        it.printf(0, 48, id(font1), "功率:%.1fW",id(ac_power).state);
+
+                  break;
+                    }
+
+
+              case 11:{
+                  
+                        it.printf(0, 0, id(font1), "环境参数");
+                        it.printf(0, 16, id(font1), "温度:%.1f℃", id(sht20_t).state);
+                        it.printf(0, 32, id(font1), "湿度:%.1f%%",id(sht20_h).state);
+
+                  break;
+                    }
+
+
+              case 12:{
+                  
+                  if (id(set_active)==0){
+                      if (id(switch_wifi).state){
+                        it.printf(0, 0, id(font1), "wifi开关查看");
+                        it.printf(0, 16, id(font1), "开");
+                      } else{
+                        it.printf(0, 0, id(font1), "wifi开关查看");
+                        it.printf(0, 16, id(font1), "关");
+
+                      }
+                      }
+                  else{ 
+                        if(id(switch_wifi).state){
+                        it.printf(0, 0, id(font1), "wifi开关设置");
+                        it.printf(0, 16, id(font1), "开");
+                      } else{
+                        it.printf(0, 0, id(font1), "wifi开关设置");
+                        it.printf(0, 16, id(font1), "关");
+
+                      }
+                      }
+                  break;
+                    }
+
+
+              case 13:{
+                  
+                        it.printf(0, 0, id(font1), "关于,启动次数%.0f",id(pump_start_times).state);
+                        it.printf(0, 16, id(font1), "联系人:谭润芝");
+                        it.printf(0, 32, id(font1), "电话:13871253721");
+                        it.printf(0, 48, id(font1), "%s",id(ip_address).state.c_str());
+
+                  break;
+                    }
+              default:{
+                      break;
+                            }
+              } 
+              }
+
+
+  
+
+
+
+
+
+interval:
+  - interval: 2000ms
+    then:
+      lambda: |-
+            if (id(sntp_time).now().timestamp - id(time_pump_up) > 60 and id(relay1).state ==1 and (id(ac_current).state< id(idle_current).state  or id(ac_current).state> id(up_current).state )){
+                id(alarm_).publish_state(1);
+                } 
+            if ((not id(my_rtttl).is_playing() ) and id(alarm_).state ){
+              id(my_rtttl).play("two_short:d=4,o=5,b=100:16e6,16e6");
+            }
